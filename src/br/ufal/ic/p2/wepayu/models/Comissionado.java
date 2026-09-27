@@ -1,6 +1,8 @@
 package br.ufal.ic.p2.wepayu.models;
 
 import br.ufal.ic.p2.wepayu.Exception.EmpregadoNaoExisteException;
+import java.util.ArrayList;
+import java.util.List;
 
 public class Comissionado extends Empregado {
 	private String comissao;
@@ -14,4 +16,15 @@ public class Comissionado extends Empregado {
 	public String getComissao() {
 		return comissao;
 	}
+	
+	private List<ResultadoDeVenda> vendas = new ArrayList<>();
+
+    public void adicionarVenda(ResultadoDeVenda venda) {
+        this.vendas.add(venda);
+    }
+
+    public List<ResultadoDeVenda> getVendas() {
+        return vendas;
+    }
+	
 }
