@@ -117,36 +117,51 @@ public class Facade {
 	}
 
 	public String getAtributoEmpregado(String emp, String atributo) throws Exception {
-		if (emp == null || emp.isEmpty())
-			throw new Exception("Identificacao do empregado nao pode ser nula.");
+	    if (emp == null || emp.isEmpty())
+	        throw new Exception("Identificacao do empregado nao pode ser nula.");
 
-		Empregado e = empregados.get(emp);
-		if (e == null)
-			throw new EmpregadoNaoExisteException();
+	    Empregado e = empregados.get(emp);
+	    if (e == null)
+	        throw new EmpregadoNaoExisteException();
 
-		if (atributo.equals("nome"))
-			return e.getNome();
-		if (atributo.equals("endereco"))
-			return e.getEndereco();
-		if (atributo.equals("tipo"))
-			return e.getTipo();
+	    if (atributo.equals("nome")) return e.getNome();
+	    if (atributo.equals("endereco")) return e.getEndereco();
+	    if (atributo.equals("tipo")) return e.getTipo();
 
-		if (atributo.equals("salario")) {
-			int sal = e.getSalario();
-			return String.format("%d,%02d", sal / 100, sal % 100);
-		}
+	    if (atributo.equals("salario")) {
+	        int sal = e.getSalario();
+	        return String.format("%d,%02d", sal / 100, sal % 100);
+	    }
 
-		if (atributo.equals("sindicalizado")) {
-            return (e.getSindicato() != null) ? "true" : "false";
-        }
+	    if (atributo.equals("sindicalizado")) {
+	        return (e.getSindicato() != null) ? "true" : "false";
+	    }
 
-		if (atributo.equals("comissao")) {
-			if (e instanceof Comissionado)
-				return ((Comissionado) e).getComissao();
-			throw new Exception("Atributo nao existe.");
-		}
+	    if (atributo.equals("comissao")) {
+	        if (!(e instanceof Comissionado)) throw new Exception("Empregado nao eh comissionado.");
+	        return ((Comissionado) e).getComissao();
+	    }
 
-		throw new Exception("Atributo nao existe.");
+	    if (atributo.equals("metodoPagamento")) return e.getMetodoPagamento();
+	    
+	    if (atributo.equals("banco") || atributo.equals("agencia") || atributo.equals("contaCorrente")) {
+	        if (!e.getMetodoPagamento().equals("banco")) throw new Exception("Empregado nao recebe em banco.");
+	        if (atributo.equals("banco")) return e.getBanco();
+	        if (atributo.equals("agencia")) return e.getAgencia();
+	        return e.getContaCorrente();
+	    }
+	    
+	    if (atributo.equals("idSindicato")) {
+	        if (e.getSindicato() == null) throw new Exception("Empregado nao eh sindicalizado.");
+	        return e.getSindicato().getIdSindicato();
+	    }
+	    
+	    if (atributo.equals("taxaSindical")) {
+	        if (e.getSindicato() == null) throw new Exception("Empregado nao eh sindicalizado.");
+	        return String.format("%.2f", e.getSindicato().getTaxaSindical()).replace(".", ",");
+	    }
+	    
+	    throw new Exception("Atributo nao existe.");	
 	}
 	//US1_1
 	
@@ -293,29 +308,7 @@ public class Facade {
         return null;
     }
 
-    // Para quando a flag valor for "false" (sair do sindicato)
-    public void alteraEmpregado(String emp, String atributo, String valor) throws Exception {
-        Empregado e = empregados.get(emp);
-        if (e == null) throw new EmpregadoNaoExisteException();
-        
-        if (atributo.equals("sindicalizado") && valor.equals("false")) {
-            e.setSindicato(null);
-        }
-    }
 
-    // Para quando a flag valor for "true" (entrar no sindicato com id e taxa)
-    public void alteraEmpregado(String emp, String atributo, String valor, String idSindicato, String taxaSindical) throws Exception {
-        Empregado e = empregados.get(emp);
-        if (e == null) throw new EmpregadoNaoExisteException();
-        
-        if (atributo.equals("sindicalizado") && valor.equals("true")) {
-            if (buscarPorSindicato(idSindicato) != null) {
-                throw new Exception("Ha outro empregado com esta identificacao de sindicato");
-            }
-            double taxa = Double.parseDouble(taxaSindical.replace(",", "."));
-            e.setSindicato(new MembroSindicato(idSindicato, taxa));
-        }
-    }
 
     public void lancaTaxaServico(String membro, String data, String valor) throws Exception {
         if (membro == null || membro.isEmpty()) throw new Exception("Identificacao do membro nao pode ser nula.");
@@ -351,4 +344,125 @@ public class Facade {
         return String.format("%.2f", total).replace(".", ",");
     }
 	
+    //US6 
+    
+ // Método auxiliar para trocar a classe do empregado sem perder os dados vitais
+    private void atualizarTipoEmpregado(String emp, Empregado e, String novoTipo, int novoSalario, String novaComissao) throws Exception {
+        Empregado novo = null;
+        if (novoTipo.equals("horista")) novo = new Horista(e.getNome(), e.getEndereco(), novoTipo, novoSalario);
+        else if (novoTipo.equals("assalariado")) novo = new Assalariado(e.getNome(), e.getEndereco(), novoTipo, novoSalario);
+        else if (novoTipo.equals("comissionado")) novo = new Comissionado(e.getNome(), e.getEndereco(), novoTipo, novoSalario, novaComissao);
+        
+        novo.setSindicato(e.getSindicato());
+        novo.setMetodoPagamento(e.getMetodoPagamento());
+        novo.setBanco(e.getBanco());
+        novo.setAgencia(e.getAgencia());
+        novo.setContaCorrente(e.getContaCorrente());
+        
+        empregados.put(emp, novo); // Substitui no mapa
+    }
+
+    // SOBRECARGA 1: 3 Argumentos (Trata nome, endereco, salario, metodoPagamento simples e desligamento do sindicato)
+    public void alteraEmpregado(String emp, String atributo, String valor) throws Exception {
+        if (emp == null || emp.isEmpty()) throw new Exception("Identificacao do empregado nao pode ser nula.");
+        Empregado e = empregados.get(emp);
+        if (e == null) throw new EmpregadoNaoExisteException();
+
+        if (atributo.equals("nome")) {
+            if (valor == null || valor.isEmpty()) throw new Exception("Nome nao pode ser nulo.");
+            e.setNome(valor);
+        } else if (atributo.equals("endereco")) {
+            if (valor == null || valor.isEmpty()) throw new Exception("Endereco nao pode ser nulo.");
+            e.setEndereco(valor);
+        } else if (atributo.equals("tipo")) {
+            if (!valor.equals("horista") && !valor.equals("assalariado") && !valor.equals("comissionado")) throw new Exception("Tipo invalido.");
+            atualizarTipoEmpregado(emp, e, valor, e.getSalario(), (e instanceof Comissionado) ? ((Comissionado)e).getComissao() : "0");
+        } else if (atributo.equals("salario")) {
+            if (valor == null || valor.isEmpty()) throw new Exception("Salario nao pode ser nulo.");
+            double sal;
+            try { sal = Double.parseDouble(valor.replace(",", ".")); } 
+            catch (Exception ex) { throw new Exception("Salario deve ser numerico."); }
+            if (sal < 0) throw new Exception("Salario deve ser nao-negativo.");
+            e.setSalario((int) Math.round(sal * 100));
+        } else if (atributo.equals("comissao")) {
+            if (!(e instanceof Comissionado)) throw new Exception("Empregado nao eh comissionado.");
+            if (valor == null || valor.isEmpty()) throw new Exception("Comissao nao pode ser nula.");
+            double c;
+            try { c = Double.parseDouble(valor.replace(",", ".")); } 
+            catch (Exception ex) { throw new Exception("Comissao deve ser numerica."); }
+            if (c < 0) throw new Exception("Comissao deve ser nao-negativa.");
+            ((Comissionado) e).setComissao(valor);
+        } else if (atributo.equals("metodoPagamento")) {
+            if (!valor.equals("emMaos") && !valor.equals("correios") && !valor.equals("banco")) throw new Exception("Metodo de pagamento invalido.");
+            e.setMetodoPagamento(valor);
+        } else if (atributo.equals("sindicalizado")) {
+            if (!valor.equals("true") && !valor.equals("false")) throw new Exception("Valor deve ser true ou false.");
+            if (valor.equals("false")) e.setSindicato(null);
+        } else {
+            throw new Exception("Atributo nao existe.");
+        }
+    }
+
+    // SOBRECARGA 2: 4 Argumentos (Trata mudança de tipo que exige comissão ou salário junto)
+    public void alteraEmpregado(String emp, String atributo, String valor, String extra) throws Exception {
+        if (emp == null || emp.isEmpty()) throw new Exception("Identificacao do empregado nao pode ser nula.");
+        Empregado e = empregados.get(emp);
+        if (e == null) throw new EmpregadoNaoExisteException();
+
+        if (atributo.equals("tipo") && valor.equals("comissionado")) {
+            if (extra == null || extra.isEmpty()) throw new Exception("Comissao nao pode ser nula.");
+            double c;
+            try { c = Double.parseDouble(extra.replace(",", ".")); } 
+            catch (Exception ex) { throw new Exception("Comissao deve ser numerica."); }
+            if (c < 0) throw new Exception("Comissao deve ser nao-negativa.");
+            atualizarTipoEmpregado(emp, e, valor, e.getSalario(), extra);
+        } else if (atributo.equals("tipo") && valor.equals("horista")) {
+            if (extra == null || extra.isEmpty()) throw new Exception("Salario nao pode ser nulo.");
+            double s;
+            try { s = Double.parseDouble(extra.replace(",", ".")); } 
+            catch (Exception ex) { throw new Exception("Salario deve ser numerico."); }
+            if (s < 0) throw new Exception("Salario deve ser nao-negativo.");
+            atualizarTipoEmpregado(emp, e, valor, (int) Math.round(s * 100), "0");
+        } else {
+            throw new Exception("Atributo nao existe.");
+        }
+    }
+
+    // SOBRECARGA 3: 5 Argumentos (Trata adesão ao sindicato)
+    public void alteraEmpregado(String emp, String atributo, String valor, String idSindicato, String taxaSindical) throws Exception {
+        if (emp == null || emp.isEmpty()) throw new Exception("Identificacao do empregado nao pode ser nula.");
+        Empregado e = empregados.get(emp);
+        if (e == null) throw new EmpregadoNaoExisteException();
+
+        if (atributo.equals("sindicalizado") && valor.equals("true")) {
+            if (idSindicato == null || idSindicato.isEmpty()) throw new Exception("Identificacao do sindicato nao pode ser nula.");
+            if (taxaSindical == null || taxaSindical.isEmpty()) throw new Exception("Taxa sindical nao pode ser nula.");
+            double t;
+            try { t = Double.parseDouble(taxaSindical.replace(",", ".")); } 
+            catch (Exception ex) { throw new Exception("Taxa sindical deve ser numerica."); }
+            if (t < 0) throw new Exception("Taxa sindical deve ser nao-negativa.");
+            if (buscarPorSindicato(idSindicato) != null) throw new Exception("Ha outro empregado com esta identificacao de sindicato");
+            
+            e.setSindicato(new MembroSindicato(idSindicato, t));
+        }
+    }
+
+    // SOBRECARGA 4: 6 Argumentos (Trata mudança para pagamento bancário)
+    public void alteraEmpregado(String emp, String atributo, String valor1, String banco, String agencia, String contaCorrente) throws Exception {
+        if (emp == null || emp.isEmpty()) throw new Exception("Identificacao do empregado nao pode ser nula.");
+        Empregado e = empregados.get(emp);
+        if (e == null) throw new EmpregadoNaoExisteException();
+
+        if (atributo.equals("metodoPagamento") && valor1.equals("banco")) {
+            if (banco == null || banco.isEmpty()) throw new Exception("Banco nao pode ser nulo.");
+            if (agencia == null || agencia.isEmpty()) throw new Exception("Agencia nao pode ser nulo.");
+            if (contaCorrente == null || contaCorrente.isEmpty()) throw new Exception("Conta corrente nao pode ser nulo.");
+            
+            e.setMetodoPagamento("banco");
+            e.setBanco(banco);
+            e.setAgencia(agencia);
+            e.setContaCorrente(contaCorrente);
+        }
+    }
+    
 }

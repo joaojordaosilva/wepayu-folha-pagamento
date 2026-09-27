@@ -26,5 +26,9 @@ public class Comissionado extends Empregado {
     public List<ResultadoDeVenda> getVendas() {
         return vendas;
     }
+    
+    public void setComissao(String comissao) {
+        this.comissao = comissao;
+    }
 	
 }
