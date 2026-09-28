@@ -11,8 +11,11 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
-
-
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.util.Stack;
 import java.io.*;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -21,9 +24,14 @@ import java.util.UUID;
 import java.time.LocalDate;
 
 public class Facade {
+	
     private Map<String, Empregado> empregados;
     private final String ARQUIVO_DADOS = "empregados.dat";
 
+    public int getNumeroDeEmpregados() {
+        return empregados.size();
+    }
+    
     public Facade() {
         // Tenta carregar o arquivo ao iniciar a Facade
         try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(ARQUIVO_DADOS))) {
@@ -31,16 +39,28 @@ public class Facade {
         } catch (Exception e) {
             // Se o arquivo não existir ou der erro, inicia um mapa vazio
             empregados = new LinkedHashMap<>();
-        }
+        }  
     }
     
+    private Stack<byte[]> undoStack = new Stack<>();
+    
+    private Stack<byte[]> redoStack = new Stack<>();
+    
+    private boolean sistemaEncerrado = false;
+    
     public void zerarSistema() {
+    	byte[] backup = capturarEstado();
         empregados.clear();
         // Opcional: apagar o arquivo fisicamente aqui também
         new File(ARQUIVO_DADOS).delete();
+        this.sistemaEncerrado = false;
+        
+        confirmarEstado(backup);
     }
 
     public void encerrarSistema() {
+    	this.sistemaEncerrado = true;
+    	
         // Salva o mapa no arquivo ao encerrar
         try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(ARQUIVO_DADOS))) {
             oos.writeObject(empregados);
@@ -53,6 +73,7 @@ public class Facade {
 	//US1
 	public String criarEmpregado(String nome, String endereco, String tipo, String salario) throws Exception {
 
+		byte[] backup = capturarEstado();
 		if (nome == null || nome.isEmpty())
 			throw new Exception("Nome nao pode ser nulo.");
 		if (endereco == null || endereco.isEmpty())
@@ -82,11 +103,13 @@ public class Facade {
 				: new Assalariado(nome, endereco, tipo, salInt);
 
 		empregados.put(id, emp);
+		confirmarEstado(backup);
 		return id;
 	}
 
 	public String criarEmpregado(String nome, String endereco, String tipo, String salario, String comissao)
 			throws Exception {
+		byte[] backup = capturarEstado();
 		if (nome == null || nome.isEmpty())
 			throw new Exception("Nome nao pode ser nulo.");
 		if (endereco == null || endereco.isEmpty())
@@ -123,6 +146,7 @@ public class Facade {
 		String id = UUID.randomUUID().toString().substring(0, 8);
 		Empregado emp = new Comissionado(nome, endereco, tipo, salInt, comissao);
 		empregados.put(id, emp);
+		confirmarEstado(backup);
 		return id;
 	}
 
@@ -193,6 +217,8 @@ public class Facade {
 	
 	//US2
 	public void removerEmpregado(String emp) throws Exception {
+		
+		byte[] backup = capturarEstado();
         if (emp == null || emp.isEmpty()) {
             throw new Exception("Identificacao do empregado nao pode ser nula.");
         }
@@ -202,6 +228,7 @@ public class Facade {
         }
         
         empregados.remove(emp);
+        confirmarEstado(backup);
     }
 	
 	//US3
@@ -224,6 +251,8 @@ public class Facade {
     }
     
     public void lancaCartao(String emp, String data, String horas) throws Exception {
+    	byte[] backup = capturarEstado();
+    	
         if (emp == null || emp.isEmpty()) throw new Exception("Identificacao do empregado nao pode ser nula.");
         
         Empregado e = empregados.get(emp);
@@ -236,6 +265,7 @@ public class Facade {
         if (h <= 0) throw new Exception("Horas devem ser positivas.");
 
         ((Horista) e).adicionarCartao(new CartaoDePonto(d, h));
+        confirmarEstado(backup);
     }
     
     private double calcularHoras(String emp, String dataInicial, String dataFinal, boolean isExtra) throws Exception {
@@ -255,6 +285,7 @@ public class Facade {
                 total += isExtra ? c.getHorasExtras() : c.getHorasNormais();
             }
         }
+        
         return total;
     }
 
@@ -270,6 +301,8 @@ public class Facade {
 	//US4
     
     public void lancaVenda(String emp, String data, String valor) throws Exception {
+    	
+    	byte[] backup = capturarEstado();
         if (emp == null || emp.isEmpty()) throw new Exception("Identificacao do empregado nao pode ser nula.");
         
         Empregado e = empregados.get(emp);
@@ -282,6 +315,8 @@ public class Facade {
         if (v <= 0) throw new Exception("Valor deve ser positivo.");
 
         ((Comissionado) e).adicionarVenda(new ResultadoDeVenda(d, v));
+        
+        confirmarEstado(backup);
     }
 
     public String getVendasRealizadas(String emp, String dataInicial, String dataFinal) throws Exception {
@@ -321,6 +356,7 @@ public class Facade {
 
 
     public void lancaTaxaServico(String membro, String data, String valor) throws Exception {
+    	byte[] backup = capturarEstado();
         if (membro == null || membro.isEmpty()) throw new Exception("Identificacao do membro nao pode ser nula.");
         
         Empregado emp = buscarPorSindicato(membro);
@@ -332,6 +368,8 @@ public class Facade {
         if (v <= 0) throw new Exception("Valor deve ser positivo.");
 
         emp.getSindicato().adicionarTaxa(new TaxaServico(d, v));
+        
+        confirmarEstado(backup);
     }
 
     public String getTaxasServico(String emp, String dataInicial, String dataFinal) throws Exception {
@@ -356,7 +394,7 @@ public class Facade {
 	
     //US6 
     
- // Método auxiliar para trocar a classe do empregado sem perder os dados vitais
+ //trocar a classe do empregado sem perder os dados vitais
     private void atualizarTipoEmpregado(String emp, Empregado e, String novoTipo, int novoSalario, String novaComissao) throws Exception {
         Empregado novo = null;
         if (novoTipo.equals("horista")) novo = new Horista(e.getNome(), e.getEndereco(), novoTipo, novoSalario);
@@ -372,8 +410,10 @@ public class Facade {
         empregados.put(emp, novo); // Substitui no mapa
     }
 
-    // SOBRECARGA 1: 3 Argumentos (Trata nome, endereco, salario, metodoPagamento simples e desligamento do sindicato)
+    // SOBRECARGA 1
     public void alteraEmpregado(String emp, String atributo, String valor) throws Exception {
+    	
+    	byte[] backup = capturarEstado();
         if (emp == null || emp.isEmpty()) throw new Exception("Identificacao do empregado nao pode ser nula.");
         Empregado e = empregados.get(emp);
         if (e == null) throw new EmpregadoNaoExisteException();
@@ -411,10 +451,13 @@ public class Facade {
         } else {
             throw new Exception("Atributo nao existe.");
         }
+        confirmarEstado(backup);
     }
 
-    // SOBRECARGA 2: 4 Argumentos (Trata mudança de tipo que exige comissão ou salário junto)
+    // SOBRECARGA 2
     public void alteraEmpregado(String emp, String atributo, String valor, String extra) throws Exception {
+    	
+    	byte[] backup = capturarEstado();
         if (emp == null || emp.isEmpty()) throw new Exception("Identificacao do empregado nao pode ser nula.");
         Empregado e = empregados.get(emp);
         if (e == null) throw new EmpregadoNaoExisteException();
@@ -436,11 +479,14 @@ public class Facade {
         } else {
             throw new Exception("Atributo nao existe.");
         }
+        confirmarEstado(backup);
     }
 
-    // SOBRECARGA 3: 5 Argumentos (Trata adesão ao sindicato)
+    // SOBRECARGA 3
     public void alteraEmpregado(String emp, String atributo, String valor, String idSindicato, String taxaSindical) throws Exception {
-        if (emp == null || emp.isEmpty()) throw new Exception("Identificacao do empregado nao pode ser nula.");
+       
+    	byte[] backup = capturarEstado();
+    	if (emp == null || emp.isEmpty()) throw new Exception("Identificacao do empregado nao pode ser nula.");
         Empregado e = empregados.get(emp);
         if (e == null) throw new EmpregadoNaoExisteException();
 
@@ -455,11 +501,14 @@ public class Facade {
             
             e.setSindicato(new MembroSindicato(idSindicato, t));
         }
+        confirmarEstado(backup);
     }
 
-    // SOBRECARGA 4: 6 Argumentos (Trata mudança para pagamento bancário)
+    // SOBRECARGA 4
     public void alteraEmpregado(String emp, String atributo, String valor1, String banco, String agencia, String contaCorrente) throws Exception {
-        if (emp == null || emp.isEmpty()) throw new Exception("Identificacao do empregado nao pode ser nula.");
+        
+    	byte[] backup = capturarEstado();
+    	if (emp == null || emp.isEmpty()) throw new Exception("Identificacao do empregado nao pode ser nula.");
         Empregado e = empregados.get(emp);
         if (e == null) throw new EmpregadoNaoExisteException();
 
@@ -473,11 +522,13 @@ public class Facade {
             e.setAgencia(agencia);
             e.setContaCorrente(contaCorrente);
         }
+        
+        confirmarEstado(backup);
     }
     
  
 
- // --- MÉTODOS AUXILIARES DE FORMATAÇÃO PARA A FOLHA ---
+ //FORMATAÇÃO PARA A FOLHA
     private String fStr(String s, int width) { return String.format("%-" + width + "s", s); }
     private String fNum(double num, int width) { 
         String val = String.format(Locale.US, "%.2f", num).replace(".", ",");
@@ -505,7 +556,7 @@ public class Facade {
         return lista;
     }
 
-    // --- MÉTODOS AUXILIARES DE CÁLCULO FINANCEIRO ---
+    // CÁLCULO FINANCEIRO 
     private double calcHoras(Horista e, LocalDate inicio, LocalDate fimBusca, boolean extra) {
         double t = 0;
         for (CartaoDePonto c : e.getCartoes()) {
@@ -593,7 +644,7 @@ public class Facade {
         return divida;
     }
 
-    // --- MOTOR DE GERAÇÃO DA FOLHA ---
+    //GERAÇÃO DA FOLHA 
     private String gerarTextoFolha(String data) throws Exception {
         LocalDate d = parseData(data, "Data invalida.");
         StringBuilder sb = new StringBuilder();
@@ -608,7 +659,7 @@ public class Facade {
 
         double totalFolha = 0.0; 
 
-        // ----- SECÇÃO: HORISTAS -----
+        //HORISTAS
         sb.append("===============================================================================================================================\n");
         sb.append("===================== HORISTAS ================================================================================================\n");
         sb.append("===============================================================================================================================\n");
@@ -646,7 +697,7 @@ public class Facade {
           .append(fNum(totHBruto, 13)).append(" ").append(fNum(totHDesc, 9)).append(" ")
           .append(fNum(totHLiq, 15)).append("\n\n");
 
-        // ----- SECÇÃO: ASSALARIADOS -----
+        //ASSALARIADOS 
         sb.append("===============================================================================================================================\n");
         sb.append("===================== ASSALARIADOS ============================================================================================\n");
         sb.append("===============================================================================================================================\n");
@@ -679,7 +730,7 @@ public class Facade {
           .append(fNum(totABruto, 13)).append(" ").append(fNum(totADesc, 9)).append(" ")
           .append(fNum(totALiq, 15)).append("\n\n");
 
-        // ----- SECÇÃO: COMISSIONADOS -----
+        // COMISSIONADOS
         sb.append("===============================================================================================================================\n");
         sb.append("===================== COMISSIONADOS ===========================================================================================\n");
         sb.append("===============================================================================================================================\n");
@@ -725,18 +776,85 @@ public class Facade {
         return sb.toString();
     }
 
-    // --- COMANDOS OFICIAIS DO EASYACCEPT PARA A US7 ---
+    //US7 
     public String totalFolha(String data) throws Exception {
+    	
         String folha = gerarTextoFolha(data);
         String[] linhas = folha.split("\n");
         return linhas[linhas.length - 1].replace("TOTAL FOLHA: ", "").trim();
     }
 
     public void rodaFolha(String data, String saida) throws Exception {
+    	byte[] backup = capturarEstado();
+    	
         String texto = gerarTextoFolha(data);
         try (PrintWriter out = new PrintWriter(saida)) {
             out.print(texto);
         }
+        confirmarEstado(backup);
+    }
+    
+    //US8
+    
+ // Cria uma cópia do estado atual do sistema
+    private byte[] capturarEstado() {
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ObjectOutputStream oos = new ObjectOutputStream(baos);
+            oos.writeObject(this.empregados);
+            oos.close();
+            return baos.toByteArray();
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw new RuntimeException("ERRO AO TIRAR A FOTOGRAFIA: " + e.getMessage());
+        }
+    }
+
+    // Só guarda o snapshot na pilha se a operação terminar com sucesso
+    
+    private void confirmarEstado(byte[] estadoAnterior) {
+    	
+        if (estadoAnterior != null) {
+        	
+            undoStack.push(estadoAnterior);
+            redoStack.clear(); // O redo é limpo sempre que uma nova ação é feita
+        }
+    }
+
+    // Substitui a memória atual pelo snapshot guardado
+    
+    @SuppressWarnings("unchecked")
+    private void restaurarEstado(byte[] estado) {
+        try {
+            ByteArrayInputStream bais = new ByteArrayInputStream(estado);
+            ObjectInputStream ois = new ObjectInputStream(bais);
+            this.empregados = (java.util.Map<String, Empregado>) ois.readObject();
+          
+            
+            ois.close();
+        } catch (Exception e) {}
+    }
+    
+    public void undo() throws Exception {
+        if (sistemaEncerrado) throw new Exception("Nao pode dar comandos depois de encerrarSistema.");
+        if (undoStack.isEmpty()) throw new Exception("Nao ha comando a desfazer.");
+        
+        byte[] estadoAtual = capturarEstado();
+        redoStack.push(estadoAtual);
+        
+        byte[] estadoAnterior = undoStack.pop();
+        restaurarEstado(estadoAnterior);
+    }
+
+    public void redo() throws Exception {
+        if (sistemaEncerrado) throw new Exception("Nao pode dar comandos depois de encerrarSistema.");
+        if (redoStack.isEmpty()) throw new Exception("Nao ha comando a refazer.");
+        
+        byte[] estadoAtual = capturarEstado();
+        undoStack.push(estadoAtual);
+        
+        byte[] proximoEstado = redoStack.pop();
+        restaurarEstado(proximoEstado);
     }
     
 }
