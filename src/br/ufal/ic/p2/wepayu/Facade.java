@@ -2,6 +2,16 @@ package br.ufal.ic.p2.wepayu;
 
 import br.ufal.ic.p2.wepayu.Exception.EmpregadoNaoExisteException;
 import br.ufal.ic.p2.wepayu.models.*;
+import java.io.PrintWriter;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
+import java.time.temporal.TemporalAdjusters;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Locale;
+
 
 import java.io.*;
 import java.util.HashMap;
@@ -462,6 +472,270 @@ public class Facade {
             e.setBanco(banco);
             e.setAgencia(agencia);
             e.setContaCorrente(contaCorrente);
+        }
+    }
+    
+ 
+
+ // --- MÉTODOS AUXILIARES DE FORMATAÇÃO PARA A FOLHA ---
+    private String fStr(String s, int width) { return String.format("%-" + width + "s", s); }
+    private String fNum(double num, int width) { 
+        String val = String.format(Locale.US, "%.2f", num).replace(".", ",");
+        if (width <= 0) return val;
+        return String.format("%" + width + "s", val);
+    }
+    private String fInt(double num, int width) { return String.format("%" + width + "s", (long)num); }
+
+    private double trunc2(double val) {
+        // Corta as decimais extras sem arredondar para cima (ex: 42.048 vira 42.04)
+        return Math.floor(val * 100.0 + 1e-6) / 100.0;
+    }
+
+    private String formatarMetodo(Empregado e) {
+        if (e.getMetodoPagamento().equals("emMaos")) return "Em maos";
+        if (e.getMetodoPagamento().equals("correios")) return "Correios, " + e.getEndereco();
+        if (e.getMetodoPagamento().equals("banco")) return e.getBanco() + ", Ag. " + e.getAgencia() + " CC " + e.getContaCorrente();
+        return "";
+    }
+
+    private List<Empregado> getEmpregadosPorTipo(String tipo) {
+        List<Empregado> lista = new ArrayList<>();
+        for (Empregado e : empregados.values()) { if (e.getTipo().equals(tipo)) lista.add(e); }
+        lista.sort(Comparator.comparing(Empregado::getNome));
+        return lista;
+    }
+
+    // --- MÉTODOS AUXILIARES DE CÁLCULO FINANCEIRO ---
+    private double calcHoras(Horista e, LocalDate inicio, LocalDate fimBusca, boolean extra) {
+        double t = 0;
+        for (CartaoDePonto c : e.getCartoes()) {
+            if (!c.getData().isBefore(inicio) && c.getData().isBefore(fimBusca)) t += extra ? c.getHorasExtras() : c.getHorasNormais();
+        }
+        return t;
+    }
+
+    private double calcVendas(Comissionado e, LocalDate inicio, LocalDate fimBusca) {
+        double t = 0;
+        for (ResultadoDeVenda v : e.getVendas()) {
+            if (!v.getData().isBefore(inicio) && v.getData().isBefore(fimBusca)) t += v.getValor();
+        }
+        return t;
+    }
+
+    private double calcDescontos(Empregado e, int dias, LocalDate inicio, LocalDate fimBusca) {
+        if (e.getSindicato() == null) return 0;
+        double fixo = e.getSindicato().getTaxaSindical() * dias;
+        double avulso = 0;
+        for (TaxaServico t : e.getSindicato().getTaxas()) {
+            if (!t.getData().isBefore(inicio) && t.getData().isBefore(fimBusca)) avulso += t.getValor();
+        }
+        return fixo + avulso;
+    }
+
+    // Simula contracheques passados para descobrir se o empregado tem taxas atrasadas
+    private double simularDividaSindicato(Empregado e, LocalDate dataDaFolha) {
+        if (e.getSindicato() == null) return 0.0;
+        
+        LocalDate inicioContrato = LocalDate.of(2005, 1, 1);
+        if (e.getTipo().equals("horista")) {
+            inicioContrato = null;
+            for (CartaoDePonto c : ((Horista)e).getCartoes()) {
+                if (inicioContrato == null || c.getData().isBefore(inicioContrato)) inicioContrato = c.getData();
+            }
+            if (inicioContrato == null) return 0.0; 
+        }
+
+        double divida = 0.0;
+        LocalDate curr = inicioContrato;
+        
+        while (curr.isBefore(dataDaFolha)) {
+            boolean isPayDay = false;
+            int diasPeriodo = 0;
+            LocalDate pInicio = null;
+            double bruto = 0.0;
+
+            if (e.getTipo().equals("horista") && curr.getDayOfWeek() == DayOfWeek.FRIDAY) {
+                isPayDay = true;
+                diasPeriodo = 7;
+                pInicio = curr.minusDays(6);
+                double hn = calcHoras((Horista)e, pInicio, curr.plusDays(1), false);
+                double he = calcHoras((Horista)e, pInicio, curr.plusDays(1), true);
+                double sal = e.getSalario() / 100.0;
+                bruto = trunc2((hn * sal) + (he * sal * 1.5));
+            }
+            else if (e.getTipo().equals("assalariado") && curr.equals(curr.with(TemporalAdjusters.lastDayOfMonth()))) {
+                isPayDay = true;
+                diasPeriodo = curr.lengthOfMonth();
+                pInicio = curr.withDayOfMonth(1);
+                bruto = trunc2(e.getSalario() / 100.0);
+            }
+            else if (e.getTipo().equals("comissionado") && curr.getDayOfWeek() == DayOfWeek.FRIDAY) {
+                long diasDesdeJan1 = ChronoUnit.DAYS.between(LocalDate.of(2005, 1, 1), curr);
+                if ((diasDesdeJan1 - 13) % 14 == 0) {
+                    isPayDay = true;
+                    diasPeriodo = 14;
+                    pInicio = curr.minusDays(13);
+                    double fixo = trunc2((e.getSalario() / 100.0) * 24.0 / 52.0);
+                    double vendas = calcVendas((Comissionado)e, pInicio, curr.plusDays(1));
+                    double cPct = Double.parseDouble(((Comissionado)e).getComissao().replace(",", "."));
+                    bruto = trunc2(fixo + trunc2(vendas * cPct));
+                }
+            }
+            
+            if (isPayDay) {
+                double taxas = trunc2(calcDescontos(e, diasPeriodo, pInicio, curr.plusDays(1)));
+                divida = trunc2(divida + taxas);
+                double pago = Math.min(bruto, divida);
+                divida = trunc2(divida - pago);
+            }
+            curr = curr.plusDays(1);
+        }
+        return divida;
+    }
+
+    // --- MOTOR DE GERAÇÃO DA FOLHA ---
+    private String gerarTextoFolha(String data) throws Exception {
+        LocalDate d = parseData(data, "Data invalida.");
+        StringBuilder sb = new StringBuilder();
+
+        sb.append("FOLHA DE PAGAMENTO DO DIA ").append(d.toString()).append("\n");
+        sb.append("====================================\n\n");
+
+        boolean pagaHorista = d.getDayOfWeek() == DayOfWeek.FRIDAY;
+        boolean pagaAssalariado = d.equals(d.with(TemporalAdjusters.lastDayOfMonth()));
+        long diasDesdeJan1 = ChronoUnit.DAYS.between(LocalDate.of(2005, 1, 1), d);
+        boolean pagaComissionado = (d.getDayOfWeek() == DayOfWeek.FRIDAY) && ((diasDesdeJan1 - 13) % 14 == 0);
+
+        double totalFolha = 0.0; 
+
+        // ----- SECÇÃO: HORISTAS -----
+        sb.append("===============================================================================================================================\n");
+        sb.append("===================== HORISTAS ================================================================================================\n");
+        sb.append("===============================================================================================================================\n");
+        sb.append("Nome                                 Horas Extra Salario Bruto Descontos Salario Liquido Metodo\n");
+        sb.append("==================================== ===== ===== ============= ========= =============== ======================================\n");
+
+        double totHHoras = 0, totHExtras = 0, totHBruto = 0, totHDesc = 0, totHLiq = 0;
+        if (pagaHorista) {
+            for (Empregado e : getEmpregadosPorTipo("horista")) {
+                LocalDate inicio = d.minusDays(6);
+                LocalDate fim = d.plusDays(1);
+                double hn = calcHoras((Horista)e, inicio, fim, false);
+                double he = calcHoras((Horista)e, inicio, fim, true);
+                double sal = e.getSalario() / 100.0;
+                double bruto = trunc2((hn * sal) + (he * sal * 1.5));
+                
+                double descAtual = trunc2(calcDescontos(e, 7, inicio, fim));
+                double dividaAnterior = simularDividaSindicato(e, d);
+                double totalDevido = trunc2(descAtual + dividaAnterior);
+                
+                double desc = bruto == 0 ? 0 : Math.min(totalDevido, bruto);
+                double liq = trunc2(bruto - desc);
+
+                sb.append(fStr(e.getNome(), 36)).append(" ")
+                  .append(fInt(hn, 5)).append(" ").append(fInt(he, 5)).append(" ")
+                  .append(fNum(bruto, 13)).append(" ").append(fNum(desc, 9)).append(" ")
+                  .append(fNum(liq, 15)).append(" ").append(formatarMetodo(e)).append("\n");
+
+                totHHoras += hn; totHExtras += he; totHBruto += bruto; totHDesc += desc; totHLiq += liq;
+                totalFolha += bruto;
+            }
+        }
+        sb.append("\n").append(fStr("TOTAL HORISTAS", 36)).append(" ")
+          .append(fInt(totHHoras, 5)).append(" ").append(fInt(totHExtras, 5)).append(" ")
+          .append(fNum(totHBruto, 13)).append(" ").append(fNum(totHDesc, 9)).append(" ")
+          .append(fNum(totHLiq, 15)).append("\n\n");
+
+        // ----- SECÇÃO: ASSALARIADOS -----
+        sb.append("===============================================================================================================================\n");
+        sb.append("===================== ASSALARIADOS ============================================================================================\n");
+        sb.append("===============================================================================================================================\n");
+        sb.append("Nome                                             Salario Bruto Descontos Salario Liquido Metodo\n");
+        sb.append("================================================ ============= ========= =============== ======================================\n");
+
+        double totABruto = 0, totADesc = 0, totALiq = 0;
+        if (pagaAssalariado) {
+            for (Empregado e : getEmpregadosPorTipo("assalariado")) {
+                LocalDate inicio = d.withDayOfMonth(1);
+                LocalDate fim = d.plusDays(1);
+                double bruto = trunc2(e.getSalario() / 100.0);
+                
+                double descAtual = trunc2(calcDescontos(e, d.lengthOfMonth(), inicio, fim));
+                double dividaAnterior = simularDividaSindicato(e, d);
+                double totalDevido = trunc2(descAtual + dividaAnterior);
+                
+                double desc = bruto == 0 ? 0 : Math.min(totalDevido, bruto);
+                double liq = trunc2(bruto - desc);
+
+                sb.append(fStr(e.getNome(), 48)).append(" ")
+                  .append(fNum(bruto, 13)).append(" ").append(fNum(desc, 9)).append(" ")
+                  .append(fNum(liq, 15)).append(" ").append(formatarMetodo(e)).append("\n");
+
+                totABruto += bruto; totADesc += desc; totALiq += liq;
+                totalFolha += bruto;
+            }
+        }
+        sb.append("\n").append(fStr("TOTAL ASSALARIADOS", 48)).append(" ")
+          .append(fNum(totABruto, 13)).append(" ").append(fNum(totADesc, 9)).append(" ")
+          .append(fNum(totALiq, 15)).append("\n\n");
+
+        // ----- SECÇÃO: COMISSIONADOS -----
+        sb.append("===============================================================================================================================\n");
+        sb.append("===================== COMISSIONADOS ===========================================================================================\n");
+        sb.append("===============================================================================================================================\n");
+        sb.append("Nome                  Fixo     Vendas   Comissao Salario Bruto Descontos Salario Liquido Metodo\n");
+        sb.append("===================== ======== ======== ======== ============= ========= =============== ======================================\n");
+
+        double totCFixo = 0, totCVendas = 0, totCComissao = 0, totCBruto = 0, totCDesc = 0, totCLiq = 0;
+        if (pagaComissionado) {
+            for (Empregado e : getEmpregadosPorTipo("comissionado")) {
+                LocalDate inicio = d.minusDays(13);
+                LocalDate fim = d.plusDays(1);
+                double fixo = trunc2((e.getSalario() / 100.0) * 24.0 / 52.0);
+                double vendas = calcVendas((Comissionado)e, inicio, fim);
+                double cPct = Double.parseDouble(((Comissionado)e).getComissao().replace(",", "."));
+                double comissao = trunc2(vendas * cPct);
+                double bruto = trunc2(fixo + comissao);
+                
+                double descAtual = trunc2(calcDescontos(e, 14, inicio, fim));
+                double dividaAnterior = simularDividaSindicato(e, d);
+                double totalDevido = trunc2(descAtual + dividaAnterior);
+                
+                double desc = bruto == 0 ? 0 : Math.min(totalDevido, bruto);
+                double liq = trunc2(bruto - desc);
+
+                sb.append(fStr(e.getNome(), 21)).append(" ")
+                  .append(fNum(fixo, 8)).append(" ").append(fNum(vendas, 8)).append(" ")
+                  .append(fNum(comissao, 8)).append(" ").append(fNum(bruto, 13)).append(" ")
+                  .append(fNum(desc, 9)).append(" ").append(fNum(liq, 15)).append(" ")
+                  .append(formatarMetodo(e)).append("\n");
+
+                totCFixo += fixo; totCVendas += vendas; totCComissao += comissao;
+                totCBruto += bruto; totCDesc += desc; totCLiq += liq;
+                totalFolha += bruto;
+            }
+        }
+        sb.append("\n").append(fStr("TOTAL COMISSIONADOS", 21)).append(" ")
+          .append(fNum(totCFixo, 8)).append(" ").append(fNum(totCVendas, 8)).append(" ")
+          .append(fNum(totCComissao, 8)).append(" ").append(fNum(totCBruto, 13)).append(" ")
+          .append(fNum(totCDesc, 9)).append(" ").append(fNum(totCLiq, 15)).append("\n\n");
+
+        sb.append("TOTAL FOLHA: ").append(fNum(totalFolha, 0)).append("\n");
+
+        return sb.toString();
+    }
+
+    // --- COMANDOS OFICIAIS DO EASYACCEPT PARA A US7 ---
+    public String totalFolha(String data) throws Exception {
+        String folha = gerarTextoFolha(data);
+        String[] linhas = folha.split("\n");
+        return linhas[linhas.length - 1].replace("TOTAL FOLHA: ", "").trim();
+    }
+
+    public void rodaFolha(String data, String saida) throws Exception {
+        String texto = gerarTextoFolha(data);
+        try (PrintWriter out = new PrintWriter(saida)) {
+            out.print(texto);
         }
     }
     
