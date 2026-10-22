@@ -2,6 +2,7 @@ package br.ufal.ic.p2.wepayu.models;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class MembroSindicato implements Serializable {
@@ -17,5 +18,9 @@ public class MembroSindicato implements Serializable {
     public String getIdSindicato() { return idSindicato; }
     public double getTaxaSindical() { return taxaSindical; }
     public void adicionarTaxa(TaxaServico taxa) { taxas.add(taxa); }
-    public List<TaxaServico> getTaxas() { return taxas; }
+    
+    public List<TaxaServico> getTaxas() { 
+        // Retorna uma visão imutável da lista
+        return Collections.unmodifiableList(taxas); 
+    }
 }

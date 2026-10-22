@@ -1,34 +1,36 @@
 package br.ufal.ic.p2.wepayu.models;
 
-import br.ufal.ic.p2.wepayu.Exception.EmpregadoNaoExisteException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class Comissionado extends Empregado {
-	private String comissao;
+    private String comissao;
+    private List<ResultadoDeVenda> vendas = new ArrayList<>();
 
-	public Comissionado(String nome, String endereco, String tipo, int salario, String comissao)
-			throws EmpregadoNaoExisteException {
-		super(nome, endereco, tipo, salario);
-		this.comissao = comissao;
-	}
-
-	public String getComissao() {
-		return comissao;
-	}
-	
-	private List<ResultadoDeVenda> vendas = new ArrayList<>();
-
-    public void adicionarVenda(ResultadoDeVenda venda) {
-        this.vendas.add(venda);
+    public Comissionado(String nome, String endereco, String tipo, int salario, String comissao) {
+        super(nome, endereco, tipo, salario);
+        this.comissao = comissao;
     }
 
-    public List<ResultadoDeVenda> getVendas() {
-        return vendas;
+    @Override
+    public String getComissao() {
+        return comissao;
     }
     
+    @Override
     public void setComissao(String comissao) {
         this.comissao = comissao;
     }
 	
+    @Override
+    public void adicionarVenda(ResultadoDeVenda venda) {
+        this.vendas.add(venda);
+    }
+
+    @Override
+    public List<ResultadoDeVenda> getVendas() {
+        // Retorna uma visão imutável da lista, impedindo modificações externas (Code Review)
+        return Collections.unmodifiableList(vendas);
+    }
 }
