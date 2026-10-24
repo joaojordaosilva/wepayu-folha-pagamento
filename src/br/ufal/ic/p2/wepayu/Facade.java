@@ -13,6 +13,7 @@ import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,10 +35,16 @@ import br.ufal.ic.p2.wepayu.models.TaxaServico;
 public class Facade {
 	
     private Map<String, Empregado> empregados;
+    private List<String> agendasDisponiveis;
     private final String ARQUIVO_DADOS = "empregados.dat";
+    
     private Stack<byte[]> undoStack = new Stack<>();
     private Stack<byte[]> redoStack = new Stack<>();
     private boolean sistemaEncerrado = false;
+
+    // =========================================================
+    // 1. INICIALIZAÇÃO E CICLO DE VIDA DO SISTEMA
+    // =========================================================
 
     @SuppressWarnings("unchecked")
     public Facade() {
@@ -45,27 +52,28 @@ public class Facade {
         if (arquivo.exists()) {
             try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(ARQUIVO_DADOS))) {
                 empregados = (Map<String, Empregado>) ois.readObject();
+                agendasDisponiveis = (List<String>) ois.readObject();
             } catch (Exception e) {
                 throw new RuntimeException("Erro ao carregar dados corrompidos: " + e.getMessage());
             }
         } else {
-            empregados = new LinkedHashMap<>();
+            iniciarDadosZerados();
         }
+    }
+    
+    private void iniciarDadosZerados() {
+        empregados = new LinkedHashMap<>();
+        agendasDisponiveis = new ArrayList<>(Arrays.asList("mensal $", "semanal 5", "semanal 2 5"));
     }
 
     private void verificarEncerramento() throws Exception {
         if (sistemaEncerrado) throw new Exception("Nao pode dar comandos depois de encerrarSistema.");
     }
-
-    public int getNumeroDeEmpregados() throws Exception {
-        verificarEncerramento();
-        return empregados.size();
-    }
     
     public void zerarSistema() throws Exception {
         verificarEncerramento();
     	byte[] backup = capturarEstado();
-        empregados.clear();
+        iniciarDadosZerados();
         new File(ARQUIVO_DADOS).delete();
         confirmarEstado(backup);
     }
@@ -74,14 +82,72 @@ public class Facade {
     	this.sistemaEncerrado = true;
         try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(ARQUIVO_DADOS))) {
             oos.writeObject(empregados);
+            oos.writeObject(agendasDisponiveis);
         } catch (Exception e) {
             throw new RuntimeException("Falha critica ao salvar sistema: " + e.getMessage());
         }
     }
 
+    // =========================================================
+    // 2. GESTÃO DE AGENDAS DE PAGAMENTO (US10)
+    // =========================================================
+    
+    private boolean validarDescricaoAgenda(String desc) {
+        String[] p = desc.split(" ");
+        if (p.length == 0) return false;
+        
+        if (p[0].equals("mensal")) {
+            if (p.length != 2) return false;
+            if (p[1].equals("$")) return true;
+            try {
+                int dia = Integer.parseInt(p[1]);
+                return dia >= 1 && dia <= 28;
+            } catch (Exception e) { return false; }
+        } else if (p[0].equals("semanal")) {
+            if (p.length == 2) {
+                try {
+                    int dia = Integer.parseInt(p[1]);
+                    return dia >= 1 && dia <= 7;
+                } catch (Exception e) { return false; }
+            } else if (p.length == 3) {
+                try {
+                    int semana = Integer.parseInt(p[1]);
+                    int dia = Integer.parseInt(p[2]);
+                    return semana >= 1 && semana <= 52 && dia >= 1 && dia <= 7;
+                } catch (Exception e) { return false; }
+            }
+        }
+        return false;
+    }
+
+    public void criarAgendaDePagamentos(String descricao) throws Exception {
+        verificarEncerramento();
+        byte[] backup = capturarEstado();
+        
+        if (!validarDescricaoAgenda(descricao)) {
+            throw new Exception("Descricao de agenda invalida");
+        }
+        if (agendasDisponiveis.contains(descricao)) {
+            throw new Exception("Agenda de pagamentos ja existe");
+        }
+        
+        agendasDisponiveis.add(descricao);
+        confirmarEstado(backup);
+    }
+
+    // =========================================================
+    // 3. CRIAÇÃO, REMOÇÃO E CONSULTA DE EMPREGADOS
+    // =========================================================
+
+    public int getNumeroDeEmpregados() throws Exception {
+        verificarEncerramento();
+        return empregados.size();
+    }
+
 	public String criarEmpregado(String nome, String endereco, String tipo, String salario) throws Exception {
         verificarEncerramento();
 		byte[] backup = capturarEstado();
+		
 		if (nome == null || nome.isEmpty()) throw new Exception("Nome nao pode ser nulo.");
 		if (endereco == null || endereco.isEmpty()) throw new Exception("Endereco nao pode ser nulo.");
 		if (tipo == null || (!tipo.equals("horista") && !tipo.equals("assalariado") && !tipo.equals("comissionado"))) throw new Exception("Tipo invalido.");
@@ -97,7 +163,7 @@ public class Facade {
 		String id = UUID.randomUUID().toString().substring(0, 8);
 
 		Empregado emp = tipo.equals("horista") ? new Horista(nome, endereco, tipo, salInt) : new Assalariado(nome, endereco, tipo, salInt);
-        emp.setAgendaPagamento(tipo.equals("horista") ? "semanal 5" : "mensal $"); // Definição de default
+        emp.setAgendaPagamento(tipo.equals("horista") ? "semanal 5" : "mensal $");
 
 		empregados.put(id, emp);
 		confirmarEstado(backup);
@@ -107,6 +173,7 @@ public class Facade {
 	public String criarEmpregado(String nome, String endereco, String tipo, String salario, String comissao) throws Exception {
         verificarEncerramento();
 		byte[] backup = capturarEstado();
+		
 		if (nome == null || nome.isEmpty()) throw new Exception("Nome nao pode ser nulo.");
 		if (endereco == null || endereco.isEmpty()) throw new Exception("Endereco nao pode ser nulo.");
 		if (tipo == null || (!tipo.equals("horista") && !tipo.equals("assalariado") && !tipo.equals("comissionado"))) throw new Exception("Tipo invalido.");
@@ -127,12 +194,22 @@ public class Facade {
 
 		String id = UUID.randomUUID().toString().substring(0, 8);
 		Empregado emp = new Comissionado(nome, endereco, tipo, salInt, comissao);
-        emp.setAgendaPagamento("semanal 2 5"); // Definição de default
+        emp.setAgendaPagamento("semanal 2 5");
 
 		empregados.put(id, emp);
 		confirmarEstado(backup);
 		return id;
 	}
+	
+	public void removerEmpregado(String emp) throws Exception {
+        verificarEncerramento();
+		byte[] backup = capturarEstado();
+        if (emp == null || emp.isEmpty()) throw new Exception("Identificacao do empregado nao pode ser nula.");
+        if (!empregados.containsKey(emp)) throw new EmpregadoNaoExisteException();
+        
+        empregados.remove(emp);
+        confirmarEstado(backup);
+    }
 
 	public String getAtributoEmpregado(String emp, String atributo) throws Exception {
         verificarEncerramento();
@@ -150,7 +227,7 @@ public class Facade {
 	    if (atributo.equals("sindicalizado")) return (e.getSindicato() != null) ? "true" : "false";
 	    if (atributo.equals("comissao")) return e.getComissao(); 
 	    if (atributo.equals("metodoPagamento")) return e.getMetodoPagamento();
-        if (atributo.equals("agendaPagamento")) return e.getAgendaPagamento(); // Nova busca
+        if (atributo.equals("agendaPagamento")) return e.getAgendaPagamento();
 	    
 	    if (atributo.equals("banco") || atributo.equals("agencia") || atributo.equals("contaCorrente")) {
 	        if (!e.getMetodoPagamento().equals("banco")) throw new Exception("Empregado nao recebe em banco.");
@@ -181,30 +258,11 @@ public class Facade {
 	    }
 	    throw new Exception("Nao ha empregado com esse nome.");
 	}
-	
-	public void removerEmpregado(String emp) throws Exception {
-        verificarEncerramento();
-		byte[] backup = capturarEstado();
-        if (emp == null || emp.isEmpty()) throw new Exception("Identificacao do empregado nao pode ser nula.");
-        if (!empregados.containsKey(emp)) throw new EmpregadoNaoExisteException();
-        empregados.remove(emp);
-        confirmarEstado(backup);
-    }
-	
-	private LocalDate parseData(String dataStr, String msgErro) throws Exception {
-        try {
-            String[] p = dataStr.split("/");
-            return LocalDate.of(Integer.parseInt(p[2]), Integer.parseInt(p[1]), Integer.parseInt(p[0]));
-        } catch (Exception e) {
-            throw new Exception(msgErro);
-        }
-    }
-
-    private String formatarHoras(double horas) {
-        if (horas % 1 == 0) return String.valueOf((long) horas);
-        return String.valueOf(horas).replace(".", ",");
-    }
     
+    // =========================================================
+    // 4. LANÇAMENTOS (CARTÕES DE PONTO, VENDAS E TAXAS)
+    // =========================================================
+
     public void lancaCartao(String emp, String data, String horas) throws Exception {
         verificarEncerramento();
     	byte[] backup = capturarEstado();
@@ -220,23 +278,6 @@ public class Facade {
         confirmarEstado(backup);
     }
     
-    private double calcularHoras(String emp, String dataInicial, String dataFinal, boolean isExtra) throws Exception {
-        Empregado e = empregados.get(emp);
-        if (e == null) throw new EmpregadoNaoExisteException();
-
-        LocalDate inicio = parseData(dataInicial, "Data inicial invalida.");
-        LocalDate fim = parseData(dataFinal, "Data final invalida.");
-        if (inicio.isAfter(fim)) throw new Exception("Data inicial nao pode ser posterior aa data final.");
-
-        double total = 0;
-        for (CartaoDePonto c : e.getCartoes()) {
-            if (!c.getData().isBefore(inicio) && c.getData().isBefore(fim)) {
-                total += isExtra ? c.getHorasExtras() : c.getHorasNormais();
-            }
-        }
-        return total;
-    }
-
     public String getHorasNormaisTrabalhadas(String emp, String dataInicial, String dataFinal) throws Exception {
         verificarEncerramento();
         return formatarHoras(calcularHoras(emp, dataInicial, dataFinal, false));
@@ -280,15 +321,6 @@ public class Facade {
         return String.format("%.2f", total).replace(".", ",");
     }
 
-    private Empregado buscarPorSindicato(String idSindicato) {
-        for (Empregado e : empregados.values()) {
-            if (e.getSindicato() != null && e.getSindicato().getIdSindicato().equals(idSindicato)) {
-                return e;
-            }
-        }
-        return null;
-    }
-
     public void lancaTaxaServico(String membro, String data, String valor) throws Exception {
         verificarEncerramento();
     	byte[] backup = capturarEstado();
@@ -324,21 +356,9 @@ public class Facade {
         return String.format("%.2f", total).replace(".", ",");
     }
 
-    private void atualizarTipoEmpregado(String emp, Empregado e, String novoTipo, int novoSalario, String novaComissao) throws Exception {
-        Empregado novo = null;
-        if (novoTipo.equals("horista")) novo = new Horista(e.getNome(), e.getEndereco(), novoTipo, novoSalario);
-        else if (novoTipo.equals("assalariado")) novo = new Assalariado(e.getNome(), e.getEndereco(), novoTipo, novoSalario);
-        else if (novoTipo.equals("comissionado")) novo = new Comissionado(e.getNome(), e.getEndereco(), novoTipo, novoSalario, novaComissao);
-        
-        novo.setSindicato(e.getSindicato());
-        novo.setMetodoPagamento(e.getMetodoPagamento());
-        novo.setBanco(e.getBanco());
-        novo.setAgencia(e.getAgencia());
-        novo.setContaCorrente(e.getContaCorrente());
-        novo.setAgendaPagamento(e.getAgendaPagamento()); // Mantém a agenda ao trocar de tipo
-        
-        empregados.put(emp, novo);
-    }
+    // =========================================================
+    // 5. ALTERAÇÃO DE DADOS DOS EMPREGADOS
+    // =========================================================
 
     public void alteraEmpregado(String emp, String atributo, String valor) throws Exception {
         verificarEncerramento();
@@ -378,7 +398,7 @@ public class Facade {
             if (!valor.equals("true") && !valor.equals("false")) throw new Exception("Valor deve ser true ou false.");
             if (valor.equals("false")) e.setSindicato(null);
         } else if (atributo.equals("agendaPagamento")) {
-            if (!valor.equals("semanal 5") && !valor.equals("mensal $") && !valor.equals("semanal 2 5")) {
+            if (!agendasDisponiveis.contains(valor)) {
                 throw new Exception("Agenda de pagamento nao esta disponivel");
             }
             e.setAgendaPagamento(valor);
@@ -457,8 +477,50 @@ public class Facade {
         }
         confirmarEstado(backup);
     }
-    
-    // FORMATADORES
+
+    // =========================================================
+    // 6. MÉTODOS E FORMATAÇÃO
+    // =========================================================
+
+    private void atualizarTipoEmpregado(String emp, Empregado e, String novoTipo, int novoSalario, String novaComissao) throws Exception {
+        Empregado novo = null;
+        if (novoTipo.equals("horista")) novo = new Horista(e.getNome(), e.getEndereco(), novoTipo, novoSalario);
+        else if (novoTipo.equals("assalariado")) novo = new Assalariado(e.getNome(), e.getEndereco(), novoTipo, novoSalario);
+        else if (novoTipo.equals("comissionado")) novo = new Comissionado(e.getNome(), e.getEndereco(), novoTipo, novoSalario, novaComissao);
+        
+        novo.setSindicato(e.getSindicato());
+        novo.setMetodoPagamento(e.getMetodoPagamento());
+        novo.setBanco(e.getBanco());
+        novo.setAgencia(e.getAgencia());
+        novo.setContaCorrente(e.getContaCorrente());
+        novo.setAgendaPagamento(e.getAgendaPagamento()); 
+        
+        empregados.put(emp, novo);
+    }
+
+    private Empregado buscarPorSindicato(String idSindicato) {
+        for (Empregado e : empregados.values()) {
+            if (e.getSindicato() != null && e.getSindicato().getIdSindicato().equals(idSindicato)) {
+                return e;
+            }
+        }
+        return null;
+    }
+
+    private LocalDate parseData(String dataStr, String msgErro) throws Exception {
+        try {
+            String[] p = dataStr.split("/");
+            return LocalDate.of(Integer.parseInt(p[2]), Integer.parseInt(p[1]), Integer.parseInt(p[0]));
+        } catch (Exception e) {
+            throw new Exception(msgErro);
+        }
+    }
+
+    private String formatarHoras(double horas) {
+        if (horas % 1 == 0) return String.valueOf((long) horas);
+        return String.valueOf(horas).replace(".", ",");
+    }
+
     private String formatarString(String s, int width) { return String.format("%-" + width + "s", s); }
     private String formatarNumero(double num, int width) { 
         String val = String.format(Locale.US, "%.2f", num).replace(".", ",");
@@ -490,42 +552,73 @@ public class Facade {
         return ultimo;
     }
 
-    // ==========================================
-    // SISTEMA DINÂMICO DE AGENDAS (US9)
-    // ==========================================
+    // =========================================================
+    // 7. CÁLCULO DA FOLHA DE PAGAMENTO
+    // =========================================================
+
     private boolean isPayDay(String agenda, LocalDate curr) {
-        if (agenda.equals("mensal $")) return curr.equals(obterUltimoDiaUtil(curr));
-        if (agenda.equals("semanal 5")) return curr.getDayOfWeek() == DayOfWeek.FRIDAY;
-        if (agenda.equals("semanal 2 5")) {
-            if (curr.getDayOfWeek() != DayOfWeek.FRIDAY) return false;
-            long dias = ChronoUnit.DAYS.between(LocalDate.of(2005, 1, 1), curr);
-            return (dias - 13) % 14 == 0;
+        String[] p = agenda.split(" ");
+        if (p[0].equals("mensal")) {
+            if (p[1].equals("$")) return curr.equals(obterUltimoDiaUtil(curr));
+            int dia = Integer.parseInt(p[1]);
+            return curr.getDayOfMonth() == dia;
+        } else if (p[0].equals("semanal")) {
+            int y = p.length == 3 ? Integer.parseInt(p[1]) : 1;
+            int x = p.length == 3 ? Integer.parseInt(p[2]) : Integer.parseInt(p[1]);
+            
+            if (curr.getDayOfWeek().getValue() != x) return false;
+            
+            LocalDate base = LocalDate.of(2005, 1, 1);
+            while (base.getDayOfWeek().getValue() != x) {
+                base = base.plusDays(1);
+            }
+            
+            if (curr.isBefore(base)) return false;
+            long weeks = ChronoUnit.WEEKS.between(base, curr);
+            return (weeks + 1) % y == 0;
         }
         return false;
     }
 
     private int getDiasPeriodo(String agenda, LocalDate curr) {
-        if (agenda.equals("mensal $")) return curr.lengthOfMonth();
-        if (agenda.equals("semanal 5")) return 7;
-        if (agenda.equals("semanal 2 5")) return 14;
-        return 0;
+        if (agenda.startsWith("mensal")) return curr.lengthOfMonth();
+        String[] p = agenda.split(" ");
+        int y = p.length == 3 ? Integer.parseInt(p[1]) : 1;
+        return y * 7;
     }
 
     private LocalDate getInicioPeriodo(String agenda, LocalDate curr) {
         if (agenda.equals("mensal $")) return curr.withDayOfMonth(1);
-        if (agenda.equals("semanal 5")) return curr.minusDays(6);
-        if (agenda.equals("semanal 2 5")) return curr.minusDays(13);
-        return null;
+        if (agenda.startsWith("mensal")) return curr.minusMonths(1).plusDays(1);
+        String[] p = agenda.split(" ");
+        int y = p.length == 3 ? Integer.parseInt(p[1]) : 1;
+        return curr.minusDays(y * 7 - 1);
     }
 
     private double getFatorSalario(String agenda) {
-        if (agenda.equals("mensal $")) return 1.0;
-        if (agenda.equals("semanal 5")) return 12.0 / 52.0;
-        if (agenda.equals("semanal 2 5")) return 12.0 / 26.0;
-        return 0.0;
+        if (agenda.startsWith("mensal")) return 1.0;
+        String[] p = agenda.split(" ");
+        int y = p.length == 3 ? Integer.parseInt(p[1]) : 1;
+        return (12.0 * y) / 52.0;
     }
 
-    // CÁLCULOS 
+    private double calcularHoras(String emp, String dataInicial, String dataFinal, boolean isExtra) throws Exception {
+        Empregado e = empregados.get(emp);
+        if (e == null) throw new EmpregadoNaoExisteException();
+
+        LocalDate inicio = parseData(dataInicial, "Data inicial invalida.");
+        LocalDate fim = parseData(dataFinal, "Data final invalida.");
+        if (inicio.isAfter(fim)) throw new Exception("Data inicial nao pode ser posterior aa data final.");
+
+        double total = 0;
+        for (CartaoDePonto c : e.getCartoes()) {
+            if (!c.getData().isBefore(inicio) && c.getData().isBefore(fim)) {
+                total += isExtra ? c.getHorasExtras() : c.getHorasNormais();
+            }
+        }
+        return total;
+    }
+
     private double calcHoras(Empregado e, LocalDate inicio, LocalDate fimBusca, boolean extra) throws Exception {
         double t = 0;
         for (CartaoDePonto c : e.getCartoes()) {
@@ -608,7 +701,7 @@ public class Facade {
 
         double totalFolha = 0.0; 
 
-        // HORISTAS
+        // ----------------- HORISTAS -----------------
         sb.append("===============================================================================================================================\n");
         sb.append("===================== HORISTAS ================================================================================================\n");
         sb.append("===============================================================================================================================\n");
@@ -644,7 +737,7 @@ public class Facade {
           .append(formatarNumero(totHBruto, 13)).append(" ").append(formatarNumero(totHDesc, 9)).append(" ")
           .append(formatarNumero(totHLiq, 15)).append("\n\n");
 
-        // ASSALARIADOS
+        // ----------------- ASSALARIADOS -----------------
         sb.append("===============================================================================================================================\n");
         sb.append("===================== ASSALARIADOS ============================================================================================\n");
         sb.append("===============================================================================================================================\n");
@@ -676,7 +769,7 @@ public class Facade {
           .append(formatarNumero(totABruto, 13)).append(" ").append(formatarNumero(totADesc, 9)).append(" ")
           .append(formatarNumero(totALiq, 15)).append("\n\n");
 
-        // COMISSIONADOS
+        // ----------------- COMISSIONADOS -----------------
         sb.append("===============================================================================================================================\n");
         sb.append("===================== COMISSIONADOS ===========================================================================================\n");
         sb.append("===============================================================================================================================\n");
@@ -737,14 +830,16 @@ public class Facade {
         confirmarEstado(backup);
     }
     
-    // ==========================================
-    // UNDO E REDO (Inalterado)
-    // ==========================================
+    // =========================================================
+    // 8-(UNDO / REDO E ESTADOS)
+    // =========================================================
+
     private byte[] capturarEstado() {
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             ObjectOutputStream oos = new ObjectOutputStream(baos);
             oos.writeObject(this.empregados);
+            oos.writeObject(this.agendasDisponiveis);
             oos.close();
             return baos.toByteArray();
         } catch (Exception e) {
@@ -765,6 +860,7 @@ public class Facade {
             ByteArrayInputStream bais = new ByteArrayInputStream(estado);
             ObjectInputStream ois = new ObjectInputStream(bais);
             this.empregados = (java.util.Map<String, Empregado>) ois.readObject();
+            this.agendasDisponiveis = (List<String>) ois.readObject();
             ois.close();
         } catch (Exception e) {
             throw new RuntimeException("Erro critico ao restaurar estado: " + e.getMessage());
