@@ -18,7 +18,7 @@ public class Horista extends Empregado {
 
     @Override
     public List<CartaoDePonto> getCartoes() {
-        // Retorna uma visão imutável da lista, impedindo modificações externas (Code Review)
+        // Retorna uma visão imutável da lista
         return Collections.unmodifiableList(cartoes);
     }
 }

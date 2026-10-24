@@ -89,17 +89,15 @@ public class Facade {
 		if (salario == null || salario.isEmpty()) throw new Exception("Salario nao pode ser nulo.");
 
 		double salDouble;
-		try {
-			salDouble = Double.parseDouble(salario.replace(",", "."));
-		} catch (NumberFormatException e) {
-			throw new Exception("Salario deve ser numerico.");
-		}
+		try { salDouble = Double.parseDouble(salario.replace(",", ".")); } 
+        catch (NumberFormatException e) { throw new Exception("Salario deve ser numerico."); }
 		if (salDouble < 0) throw new Exception("Salario deve ser nao-negativo.");
 
 		int salInt = (int) Math.round(salDouble * 100);
 		String id = UUID.randomUUID().toString().substring(0, 8);
 
 		Empregado emp = tipo.equals("horista") ? new Horista(nome, endereco, tipo, salInt) : new Assalariado(nome, endereco, tipo, salInt);
+        emp.setAgendaPagamento(tipo.equals("horista") ? "semanal 5" : "mensal $"); // Definição de default
 
 		empregados.put(id, emp);
 		confirmarEstado(backup);
@@ -116,25 +114,21 @@ public class Facade {
 		if (salario == null || salario.isEmpty()) throw new Exception("Salario nao pode ser nulo.");
         
 		double salDouble;
-		try {
-			salDouble = Double.parseDouble(salario.replace(",", "."));
-		} catch (NumberFormatException e) {
-			throw new Exception("Salario deve ser numerico.");
-		}
+		try { salDouble = Double.parseDouble(salario.replace(",", ".")); } 
+        catch (NumberFormatException e) { throw new Exception("Salario deve ser numerico."); }
 		if (salDouble < 0) throw new Exception("Salario deve ser nao-negativo.");
 		int salInt = (int) Math.round(salDouble * 100);
 
 		if (comissao == null || comissao.isEmpty()) throw new Exception("Comissao nao pode ser nula.");
 		double comDouble;
-		try {
-			comDouble = Double.parseDouble(comissao.replace(",", "."));
-		} catch (NumberFormatException e) {
-			throw new Exception("Comissao deve ser numerica.");
-		}
+		try { comDouble = Double.parseDouble(comissao.replace(",", ".")); } 
+        catch (NumberFormatException e) { throw new Exception("Comissao deve ser numerica."); }
 		if (comDouble < 0) throw new Exception("Comissao deve ser nao-negativa.");
 
 		String id = UUID.randomUUID().toString().substring(0, 8);
 		Empregado emp = new Comissionado(nome, endereco, tipo, salInt, comissao);
+        emp.setAgendaPagamento("semanal 2 5"); // Definição de default
+
 		empregados.put(id, emp);
 		confirmarEstado(backup);
 		return id;
@@ -154,8 +148,9 @@ public class Facade {
 	        return String.format("%d,%02d", sal / 100, sal % 100);
 	    }
 	    if (atributo.equals("sindicalizado")) return (e.getSindicato() != null) ? "true" : "false";
-	    if (atributo.equals("comissao")) return e.getComissao(); // Polimorfismo
+	    if (atributo.equals("comissao")) return e.getComissao(); 
 	    if (atributo.equals("metodoPagamento")) return e.getMetodoPagamento();
+        if (atributo.equals("agendaPagamento")) return e.getAgendaPagamento(); // Nova busca
 	    
 	    if (atributo.equals("banco") || atributo.equals("agencia") || atributo.equals("contaCorrente")) {
 	        if (!e.getMetodoPagamento().equals("banco")) throw new Exception("Empregado nao recebe em banco.");
@@ -221,7 +216,7 @@ public class Facade {
         double h = Double.parseDouble(horas.replace(",", "."));
         if (h <= 0) throw new Exception("Horas devem ser positivas.");
 
-        e.adicionarCartao(new CartaoDePonto(d, h)); // Polimorfismo
+        e.adicionarCartao(new CartaoDePonto(d, h));
         confirmarEstado(backup);
     }
     
@@ -263,7 +258,7 @@ public class Facade {
         double v = Double.parseDouble(valor.replace(",", "."));
         if (v <= 0) throw new Exception("Valor deve ser positivo.");
 
-        e.adicionarVenda(new ResultadoDeVenda(d, v)); // Polimorfismo
+        e.adicionarVenda(new ResultadoDeVenda(d, v)); 
         confirmarEstado(backup);
     }
 
@@ -340,6 +335,7 @@ public class Facade {
         novo.setBanco(e.getBanco());
         novo.setAgencia(e.getAgencia());
         novo.setContaCorrente(e.getContaCorrente());
+        novo.setAgendaPagamento(e.getAgendaPagamento()); // Mantém a agenda ao trocar de tipo
         
         empregados.put(emp, novo);
     }
@@ -374,13 +370,18 @@ public class Facade {
             try { c = Double.parseDouble(valor.replace(",", ".")); } 
             catch (Exception ex) { throw new Exception("Comissao deve ser numerica."); }
             if (c < 0) throw new Exception("Comissao deve ser nao-negativa.");
-            e.setComissao(valor); // Polimorfismo
+            e.setComissao(valor);
         } else if (atributo.equals("metodoPagamento")) {
             if (!valor.equals("emMaos") && !valor.equals("correios") && !valor.equals("banco")) throw new Exception("Metodo de pagamento invalido.");
             e.setMetodoPagamento(valor);
         } else if (atributo.equals("sindicalizado")) {
             if (!valor.equals("true") && !valor.equals("false")) throw new Exception("Valor deve ser true ou false.");
             if (valor.equals("false")) e.setSindicato(null);
+        } else if (atributo.equals("agendaPagamento")) {
+            if (!valor.equals("semanal 5") && !valor.equals("mensal $") && !valor.equals("semanal 2 5")) {
+                throw new Exception("Agenda de pagamento nao esta disponivel");
+            }
+            e.setAgendaPagamento(valor);
         } else {
             throw new Exception("Atributo nao existe.");
         }
@@ -457,6 +458,7 @@ public class Facade {
         confirmarEstado(backup);
     }
     
+    // FORMATADORES
     private String formatarString(String s, int width) { return String.format("%-" + width + "s", s); }
     private String formatarNumero(double num, int width) { 
         String val = String.format(Locale.US, "%.2f", num).replace(".", ",");
@@ -465,9 +467,7 @@ public class Facade {
     }
     private String formatarInteiro(double num, int width) { return String.format("%" + width + "s", (long)num); }
 
-    private double truncarDuasCasas(double val) {
-        return Math.floor(val * 100.0 + 1e-6) / 100.0;
-    }
+    private double truncarDuasCasas(double val) { return Math.floor(val * 100.0 + 1e-6) / 100.0; }
 
     private String formatarMetodo(Empregado e) {
         if (e.getMetodoPagamento().equals("emMaos")) return "Em maos";
@@ -490,6 +490,42 @@ public class Facade {
         return ultimo;
     }
 
+    // ==========================================
+    // SISTEMA DINÂMICO DE AGENDAS (US9)
+    // ==========================================
+    private boolean isPayDay(String agenda, LocalDate curr) {
+        if (agenda.equals("mensal $")) return curr.equals(obterUltimoDiaUtil(curr));
+        if (agenda.equals("semanal 5")) return curr.getDayOfWeek() == DayOfWeek.FRIDAY;
+        if (agenda.equals("semanal 2 5")) {
+            if (curr.getDayOfWeek() != DayOfWeek.FRIDAY) return false;
+            long dias = ChronoUnit.DAYS.between(LocalDate.of(2005, 1, 1), curr);
+            return (dias - 13) % 14 == 0;
+        }
+        return false;
+    }
+
+    private int getDiasPeriodo(String agenda, LocalDate curr) {
+        if (agenda.equals("mensal $")) return curr.lengthOfMonth();
+        if (agenda.equals("semanal 5")) return 7;
+        if (agenda.equals("semanal 2 5")) return 14;
+        return 0;
+    }
+
+    private LocalDate getInicioPeriodo(String agenda, LocalDate curr) {
+        if (agenda.equals("mensal $")) return curr.withDayOfMonth(1);
+        if (agenda.equals("semanal 5")) return curr.minusDays(6);
+        if (agenda.equals("semanal 2 5")) return curr.minusDays(13);
+        return null;
+    }
+
+    private double getFatorSalario(String agenda) {
+        if (agenda.equals("mensal $")) return 1.0;
+        if (agenda.equals("semanal 5")) return 12.0 / 52.0;
+        if (agenda.equals("semanal 2 5")) return 12.0 / 26.0;
+        return 0.0;
+    }
+
+    // CÁLCULOS 
     private double calcHoras(Empregado e, LocalDate inicio, LocalDate fimBusca, boolean extra) throws Exception {
         double t = 0;
         for (CartaoDePonto c : e.getCartoes()) {
@@ -516,6 +552,22 @@ public class Facade {
         return fixo + avulso;
     }
 
+    private double calcularSalarioBrutoDinamicamente(Empregado e, LocalDate pInicio, LocalDate curr) throws Exception {
+        if (e.getTipo().equals("horista")) {
+            double hn = calcHoras(e, pInicio, curr.plusDays(1), false);
+            double he = calcHoras(e, pInicio, curr.plusDays(1), true);
+            double sal = e.getSalario() / 100.0;
+            return truncarDuasCasas((hn * sal) + (he * sal * 1.5));
+        } else if (e.getTipo().equals("assalariado")) {
+            return truncarDuasCasas((e.getSalario() / 100.0) * getFatorSalario(e.getAgendaPagamento()));
+        } else {
+            double fixo = truncarDuasCasas((e.getSalario() / 100.0) * getFatorSalario(e.getAgendaPagamento()));
+            double vendas = calcVendas(e, pInicio, curr.plusDays(1));
+            double cPct = Double.parseDouble(e.getComissao().replace(",", "."));
+            return truncarDuasCasas(fixo + truncarDuasCasas(vendas * cPct));
+        }
+    }
+
     private double simularDividaSindicato(Empregado e, LocalDate dataDaFolha) throws Exception {
         if (e.getSindicato() == null) return 0.0;
         
@@ -532,40 +584,11 @@ public class Facade {
         LocalDate curr = inicioContrato;
         
         while (curr.isBefore(dataDaFolha)) {
-            boolean isPayDay = false;
-            int diasPeriodo = 0;
-            LocalDate pInicio = null;
-            double bruto = 0.0;
-
-            if (e.getTipo().equals("horista") && curr.getDayOfWeek() == DayOfWeek.FRIDAY) {
-                isPayDay = true;
-                diasPeriodo = 7;
-                pInicio = curr.minusDays(6);
-                double hn = calcHoras(e, pInicio, curr.plusDays(1), false);
-                double he = calcHoras(e, pInicio, curr.plusDays(1), true);
-                double sal = e.getSalario() / 100.0;
-                bruto = truncarDuasCasas((hn * sal) + (he * sal * 1.5));
-            }
-            else if (e.getTipo().equals("assalariado") && curr.equals(obterUltimoDiaUtil(curr))) {
-                isPayDay = true;
-                diasPeriodo = curr.lengthOfMonth();
-                pInicio = curr.withDayOfMonth(1);
-                bruto = truncarDuasCasas(e.getSalario() / 100.0);
-            }
-            else if (e.getTipo().equals("comissionado") && curr.getDayOfWeek() == DayOfWeek.FRIDAY) {
-                long diasDesdeJan1 = ChronoUnit.DAYS.between(LocalDate.of(2005, 1, 1), curr);
-                if ((diasDesdeJan1 - 13) % 14 == 0) {
-                    isPayDay = true;
-                    diasPeriodo = 14;
-                    pInicio = curr.minusDays(13);
-                    double fixo = truncarDuasCasas((e.getSalario() / 100.0) * 24.0 / 52.0);
-                    double vendas = calcVendas(e, pInicio, curr.plusDays(1));
-                    double cPct = Double.parseDouble(e.getComissao().replace(",", "."));
-                    bruto = truncarDuasCasas(fixo + truncarDuasCasas(vendas * cPct));
-                }
-            }
-            
-            if (isPayDay) {
+            if (isPayDay(e.getAgendaPagamento(), curr)) {
+                LocalDate pInicio = getInicioPeriodo(e.getAgendaPagamento(), curr);
+                int diasPeriodo = getDiasPeriodo(e.getAgendaPagamento(), curr);
+                
+                double bruto = calcularSalarioBrutoDinamicamente(e, pInicio, curr);
                 double taxas = truncarDuasCasas(calcDescontos(e, diasPeriodo, pInicio, curr.plusDays(1)));
                 divida = truncarDuasCasas(divida + taxas);
                 double pago = Math.min(bruto, divida);
@@ -583,13 +606,9 @@ public class Facade {
         sb.append("FOLHA DE PAGAMENTO DO DIA ").append(d.toString()).append("\n");
         sb.append("====================================\n\n");
 
-        boolean pagaHorista = d.getDayOfWeek() == DayOfWeek.FRIDAY;
-        boolean pagaAssalariado = d.equals(obterUltimoDiaUtil(d));
-        long diasDesdeJan1 = ChronoUnit.DAYS.between(LocalDate.of(2005, 1, 1), d);
-        boolean pagaComissionado = (d.getDayOfWeek() == DayOfWeek.FRIDAY) && ((diasDesdeJan1 - 13) % 14 == 0);
-
         double totalFolha = 0.0; 
 
+        // HORISTAS
         sb.append("===============================================================================================================================\n");
         sb.append("===================== HORISTAS ================================================================================================\n");
         sb.append("===============================================================================================================================\n");
@@ -597,36 +616,35 @@ public class Facade {
         sb.append("==================================== ===== ===== ============= ========= =============== ======================================\n");
 
         double totHHoras = 0, totHExtras = 0, totHBruto = 0, totHDesc = 0, totHLiq = 0;
-        if (pagaHorista) {
-            for (Empregado e : getEmpregadosPorTipo("horista")) {
-                LocalDate inicio = d.minusDays(6);
-                LocalDate fim = d.plusDays(1);
-                double hn = calcHoras(e, inicio, fim, false);
-                double he = calcHoras(e, inicio, fim, true);
-                double sal = e.getSalario() / 100.0;
-                double bruto = truncarDuasCasas((hn * sal) + (he * sal * 1.5));
-                
-                double descAtual = truncarDuasCasas(calcDescontos(e, 7, inicio, fim));
-                double dividaAnterior = simularDividaSindicato(e, d);
-                double totalDevido = truncarDuasCasas(descAtual + dividaAnterior);
-                
-                double desc = bruto == 0 ? 0 : Math.min(totalDevido, bruto);
-                double liq = truncarDuasCasas(bruto - desc);
+        for (Empregado e : getEmpregadosPorTipo("horista")) {
+            if (!isPayDay(e.getAgendaPagamento(), d)) continue;
 
-                sb.append(formatarString(e.getNome(), 36)).append(" ")
-                  .append(formatarInteiro(hn, 5)).append(" ").append(formatarInteiro(he, 5)).append(" ")
-                  .append(formatarNumero(bruto, 13)).append(" ").append(formatarNumero(desc, 9)).append(" ")
-                  .append(formatarNumero(liq, 15)).append(" ").append(formatarMetodo(e)).append("\n");
+            LocalDate inicio = getInicioPeriodo(e.getAgendaPagamento(), d);
+            double hn = calcHoras(e, inicio, d.plusDays(1), false);
+            double he = calcHoras(e, inicio, d.plusDays(1), true);
+            double bruto = calcularSalarioBrutoDinamicamente(e, inicio, d);
+            
+            double descAtual = truncarDuasCasas(calcDescontos(e, getDiasPeriodo(e.getAgendaPagamento(), d), inicio, d.plusDays(1)));
+            double dividaAnterior = simularDividaSindicato(e, d);
+            double totalDevido = truncarDuasCasas(descAtual + dividaAnterior);
+            
+            double desc = bruto == 0 ? 0 : Math.min(totalDevido, bruto);
+            double liq = truncarDuasCasas(bruto - desc);
 
-                totHHoras += hn; totHExtras += he; totHBruto += bruto; totHDesc += desc; totHLiq += liq;
-                totalFolha += bruto;
-            }
+            sb.append(formatarString(e.getNome(), 36)).append(" ")
+                .append(formatarInteiro(hn, 5)).append(" ").append(formatarInteiro(he, 5)).append(" ")
+                .append(formatarNumero(bruto, 13)).append(" ").append(formatarNumero(desc, 9)).append(" ")
+                .append(formatarNumero(liq, 15)).append(" ").append(formatarMetodo(e)).append("\n");
+
+            totHHoras += hn; totHExtras += he; totHBruto += bruto; totHDesc += desc; totHLiq += liq;
+            totalFolha += bruto;
         }
         sb.append("\n").append(formatarString("TOTAL HORISTAS", 36)).append(" ")
           .append(formatarInteiro(totHHoras, 5)).append(" ").append(formatarInteiro(totHExtras, 5)).append(" ")
           .append(formatarNumero(totHBruto, 13)).append(" ").append(formatarNumero(totHDesc, 9)).append(" ")
           .append(formatarNumero(totHLiq, 15)).append("\n\n");
 
+        // ASSALARIADOS
         sb.append("===============================================================================================================================\n");
         sb.append("===================== ASSALARIADOS ============================================================================================\n");
         sb.append("===============================================================================================================================\n");
@@ -634,31 +652,31 @@ public class Facade {
         sb.append("================================================ ============= ========= =============== ======================================\n");
 
         double totABruto = 0, totADesc = 0, totALiq = 0;
-        if (pagaAssalariado) {
-            for (Empregado e : getEmpregadosPorTipo("assalariado")) {
-                LocalDate inicio = d.withDayOfMonth(1);
-                LocalDate fim = d.plusDays(1);
-                double bruto = truncarDuasCasas(e.getSalario() / 100.0);
-                
-                double descAtual = truncarDuasCasas(calcDescontos(e, d.lengthOfMonth(), inicio, fim));
-                double dividaAnterior = simularDividaSindicato(e, d);
-                double totalDevido = truncarDuasCasas(descAtual + dividaAnterior);
-                
-                double desc = bruto == 0 ? 0 : Math.min(totalDevido, bruto);
-                double liq = truncarDuasCasas(bruto - desc);
+        for (Empregado e : getEmpregadosPorTipo("assalariado")) {
+            if (!isPayDay(e.getAgendaPagamento(), d)) continue;
 
-                sb.append(formatarString(e.getNome(), 48)).append(" ")
-                  .append(formatarNumero(bruto, 13)).append(" ").append(formatarNumero(desc, 9)).append(" ")
-                  .append(formatarNumero(liq, 15)).append(" ").append(formatarMetodo(e)).append("\n");
+            LocalDate inicio = getInicioPeriodo(e.getAgendaPagamento(), d);
+            double bruto = calcularSalarioBrutoDinamicamente(e, inicio, d);
+            
+            double descAtual = truncarDuasCasas(calcDescontos(e, getDiasPeriodo(e.getAgendaPagamento(), d), inicio, d.plusDays(1)));
+            double dividaAnterior = simularDividaSindicato(e, d);
+            double totalDevido = truncarDuasCasas(descAtual + dividaAnterior);
+            
+            double desc = bruto == 0 ? 0 : Math.min(totalDevido, bruto);
+            double liq = truncarDuasCasas(bruto - desc);
 
-                totABruto += bruto; totADesc += desc; totALiq += liq;
-                totalFolha += bruto;
-            }
+            sb.append(formatarString(e.getNome(), 48)).append(" ")
+                .append(formatarNumero(bruto, 13)).append(" ").append(formatarNumero(desc, 9)).append(" ")
+                .append(formatarNumero(liq, 15)).append(" ").append(formatarMetodo(e)).append("\n");
+
+            totABruto += bruto; totADesc += desc; totALiq += liq;
+            totalFolha += bruto;
         }
         sb.append("\n").append(formatarString("TOTAL ASSALARIADOS", 48)).append(" ")
           .append(formatarNumero(totABruto, 13)).append(" ").append(formatarNumero(totADesc, 9)).append(" ")
           .append(formatarNumero(totALiq, 15)).append("\n\n");
 
+        // COMISSIONADOS
         sb.append("===============================================================================================================================\n");
         sb.append("===================== COMISSIONADOS ===========================================================================================\n");
         sb.append("===============================================================================================================================\n");
@@ -666,33 +684,32 @@ public class Facade {
         sb.append("===================== ======== ======== ======== ============= ========= =============== ======================================\n");
 
         double totCFixo = 0, totCVendas = 0, totCComissao = 0, totCBruto = 0, totCDesc = 0, totCLiq = 0;
-        if (pagaComissionado) {
-            for (Empregado e : getEmpregadosPorTipo("comissionado")) {
-                LocalDate inicio = d.minusDays(13);
-                LocalDate fim = d.plusDays(1);
-                double fixo = truncarDuasCasas((e.getSalario() / 100.0) * 24.0 / 52.0);
-                double vendas = calcVendas(e, inicio, fim);
-                double cPct = Double.parseDouble(e.getComissao().replace(",", "."));
-                double comissao = truncarDuasCasas(vendas * cPct);
-                double bruto = truncarDuasCasas(fixo + comissao);
-                
-                double descAtual = truncarDuasCasas(calcDescontos(e, 14, inicio, fim));
-                double dividaAnterior = simularDividaSindicato(e, d);
-                double totalDevido = truncarDuasCasas(descAtual + dividaAnterior);
-                
-                double desc = bruto == 0 ? 0 : Math.min(totalDevido, bruto);
-                double liq = truncarDuasCasas(bruto - desc);
+        for (Empregado e : getEmpregadosPorTipo("comissionado")) {
+            if (!isPayDay(e.getAgendaPagamento(), d)) continue;
 
-                sb.append(formatarString(e.getNome(), 21)).append(" ")
-                  .append(formatarNumero(fixo, 8)).append(" ").append(formatarNumero(vendas, 8)).append(" ")
-                  .append(formatarNumero(comissao, 8)).append(" ").append(formatarNumero(bruto, 13)).append(" ")
-                  .append(formatarNumero(desc, 9)).append(" ").append(formatarNumero(liq, 15)).append(" ")
-                  .append(formatarMetodo(e)).append("\n");
+            LocalDate inicio = getInicioPeriodo(e.getAgendaPagamento(), d);
+            double fixo = truncarDuasCasas((e.getSalario() / 100.0) * getFatorSalario(e.getAgendaPagamento()));
+            double vendas = calcVendas(e, inicio, d.plusDays(1));
+            double cPct = Double.parseDouble(e.getComissao().replace(",", "."));
+            double comissao = truncarDuasCasas(vendas * cPct);
+            double bruto = calcularSalarioBrutoDinamicamente(e, inicio, d);
+            
+            double descAtual = truncarDuasCasas(calcDescontos(e, getDiasPeriodo(e.getAgendaPagamento(), d), inicio, d.plusDays(1)));
+            double dividaAnterior = simularDividaSindicato(e, d);
+            double totalDevido = truncarDuasCasas(descAtual + dividaAnterior);
+            
+            double desc = bruto == 0 ? 0 : Math.min(totalDevido, bruto);
+            double liq = truncarDuasCasas(bruto - desc);
 
-                totCFixo += fixo; totCVendas += vendas; totCComissao += comissao;
-                totCBruto += bruto; totCDesc += desc; totCLiq += liq;
-                totalFolha += bruto;
-            }
+            sb.append(formatarString(e.getNome(), 21)).append(" ")
+                .append(formatarNumero(fixo, 8)).append(" ").append(formatarNumero(vendas, 8)).append(" ")
+                .append(formatarNumero(comissao, 8)).append(" ").append(formatarNumero(bruto, 13)).append(" ")
+                .append(formatarNumero(desc, 9)).append(" ").append(formatarNumero(liq, 15)).append(" ")
+                .append(formatarMetodo(e)).append("\n");
+
+            totCFixo += fixo; totCVendas += vendas; totCComissao += comissao;
+            totCBruto += bruto; totCDesc += desc; totCLiq += liq;
+            totalFolha += bruto;
         }
         sb.append("\n").append(formatarString("TOTAL COMISSIONADOS", 21)).append(" ")
           .append(formatarNumero(totCFixo, 8)).append(" ").append(formatarNumero(totCVendas, 8)).append(" ")
@@ -700,7 +717,6 @@ public class Facade {
           .append(formatarNumero(totCDesc, 9)).append(" ").append(formatarNumero(totCLiq, 15)).append("\n\n");
 
         sb.append("TOTAL FOLHA: ").append(formatarNumero(totalFolha, 0)).append("\n");
-
         return sb.toString();
     }
 
@@ -721,6 +737,9 @@ public class Facade {
         confirmarEstado(backup);
     }
     
+    // ==========================================
+    // UNDO E REDO (Inalterado)
+    // ==========================================
     private byte[] capturarEstado() {
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();

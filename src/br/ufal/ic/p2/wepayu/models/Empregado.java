@@ -13,8 +13,10 @@ public abstract class Empregado implements Serializable {
     private String banco;
     private String agencia;
     private String contaCorrente;
+    
+    // NOVO ATRIBUTO (US9)
+    private String agendaPagamento;
 
-    // Construtor corrigido: removido o throws EmpregadoNaoExisteException
     public Empregado(String nome, String endereco, String tipo, int salario) {
         this.nome = nome;
         this.endereco = endereco;
@@ -46,10 +48,14 @@ public abstract class Empregado implements Serializable {
     public void setContaCorrente(String contaCorrente) { this.contaCorrente = contaCorrente; }
     public String getContaCorrente() { return contaCorrente; }
 
-    
+    // GETTER E SETTER DA AGENDA (US9)
+    public void setAgendaPagamento(String agendaPagamento) { this.agendaPagamento = agendaPagamento; }
+    public String getAgendaPagamento() { return agendaPagamento; }
+
+    // =========================================================
     // MÉTODOS POLIMÓRFICOS (Comportamento padrão: lançar erro)
-  
-   
+    // =========================================================
+    
     public String getComissao() throws Exception {
         throw new Exception("Empregado nao eh comissionado.");
     }

@@ -30,7 +30,7 @@ public class Comissionado extends Empregado {
 
     @Override
     public List<ResultadoDeVenda> getVendas() {
-        // Retorna uma visão imutável da lista, impedindo modificações externas (Code Review)
+        // Retorna uma visão imutável da lista
         return Collections.unmodifiableList(vendas);
     }
 }
